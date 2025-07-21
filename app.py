@@ -7,7 +7,7 @@ import io
 import xlsxwriter
 import plotly.express as px
 from gspread.exceptions import SpreadsheetNotFound, APIError
-
+import json from oauth2client.service_account import ServiceAccountCredentials
 # Google Sheets setup
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.file"]
 CREDS_FILE = "credentials.json"  # Ensure this file is in your project directory
@@ -15,7 +15,11 @@ SHEET_NAME = "FamilyExpenses"
 
 def get_google_sheet():
     try:
-        creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPE)
+        
+
+        creds_dict = json.loads(st.secrets["GOOGLE_SHEETS_CREDS"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
+
         client = gspread.authorize(creds)
         SHEET_ID="1KdQKgqlOkknTgWCVenFL6TZqdPcLwwOLP7Azx-fh9L4"
         sheet = client.open_by_key(SHEET_ID).sheet1
