@@ -36,6 +36,7 @@ def get_google_sheet():
         return None
 
 # Load data
+sheet= get_google_sheet()
 def load_data():
     sheet = get_google_sheet()
     if sheet:
@@ -170,57 +171,59 @@ if not filtered_df.empty:
         file_name=f"transactions_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
     )
 
-# Monthly summary by person
-st.subheader("📆 Monthly Summary by Person")
-df = st.session_state.df.copy()
-df['month'] = df['date'].dt.strftime('%m-%Y')
 
 
 person_summary = []
-people = pd.unique(df[['from', 'to']].values.ravel('K'))
+if sheet.get_all_records() :
+    # Monthly summary by person
+    st.subheader("📆 Monthly Summary by Person")
+    df = st.session_state.df.copy()
+    df['month'] = df['date'].dt.strftime('%m-%Y')
+    people = pd.unique(df[['from', 'to']].values.ravel('K'))
+    for person in people:
+        monthly = df.copy()
+        monthly['net'] = 0
+        monthly.loc[(monthly['type'] == 'income') & (monthly['from'] != person)& (monthly['to'] == person), 'net'] = monthly['amount']
+        monthly.loc[(monthly['type'] == 'income') & (monthly['to'] != person)& (monthly['from'] == person), 'net'] = -monthly['amount']
+        monthly.loc[(monthly['type'] == 'expense')& (monthly['from'] != person) & (monthly['from'] == person), 'net'] = -monthly['amount']
+        monthly.loc[(monthly['type'] == 'expense')& (monthly['from'] != person) & (monthly['to'] == person), 'net'] = monthly['amount']
+        monthly.loc[(monthly['type'] == 'transfer') & (monthly['from'] != person)& (monthly['to'] == person), 'net'] = monthly['amount']
+        monthly.loc[(monthly['type'] == 'transfer') & (monthly['to'] != person)& (monthly['from'] == person), 'net'] = -monthly['amount']
+        summary = monthly.groupby('month')['net'].sum().reset_index()
+        summary['person'] = person
+        person_summary.append(summary)
 
-for person in people:
-    monthly = df.copy()
-    monthly['net'] = 0
-    monthly.loc[(monthly['type'] == 'income') & (monthly['from'] != person)& (monthly['to'] == person), 'net'] = monthly['amount']
-    monthly.loc[(monthly['type'] == 'income') & (monthly['to'] != person)& (monthly['from'] == person), 'net'] = -monthly['amount']
-    monthly.loc[(monthly['type'] == 'expense')& (monthly['from'] != person) & (monthly['from'] == person), 'net'] = -monthly['amount']
-    monthly.loc[(monthly['type'] == 'expense')& (monthly['from'] != person) & (monthly['to'] == person), 'net'] = monthly['amount']
-    monthly.loc[(monthly['type'] == 'transfer') & (monthly['from'] != person)& (monthly['to'] == person), 'net'] = monthly['amount']
-    monthly.loc[(monthly['type'] == 'transfer') & (monthly['to'] != person)& (monthly['from'] == person), 'net'] = -monthly['amount']
-    summary = monthly.groupby('month')['net'].sum().reset_index()
-    summary['person'] = person
-    person_summary.append(summary)
+    summary_df = pd.concat(person_summary)
+    summary_pivot = summary_df.pivot(index='month', columns='person', values='net').fillna(0)
+    st.dataframe(summary_pivot)
 
-summary_df = pd.concat(person_summary)
-summary_pivot = summary_df.pivot(index='month', columns='person', values='net').fillna(0)
-st.dataframe(summary_pivot)
-
-# Expense breakdown total balance
-st.subheader("📊 Balance by Person")
-people = sorted(pd.unique(df[['from', 'to']].values.ravel('K')))
-balance_data = []
-for person in people:
-    income = df[(df['type'] == 'income') & (df['to'] == person)]['amount'].sum() + \
-             df[(df['type'] == 'expense') & (df['to'] == person)]['amount'].sum()
-    expense = df[(df['type'] == 'expense') & (df['from'] == person)]['amount'].sum() + \
-              df[(df['type'] == 'income') & (df['from'] == person)]['amount'].sum()
-    transferred_in = df[(df['type'] == 'transfer') & (df['to'] == person)]['amount'].sum()
-    transferred_out = df[(df['type'] == 'transfer') & (df['from'] == person)]['amount'].sum()
-    total = (income + transferred_in) - (expense + transferred_out)
-    balance_data.append({
-        'person': person,
-        'income': income,
-        'expense': expense,
-        'transferred_in': transferred_in,
-        'transferred_out': transferred_out,
-        'total': total
-    })
-
-balance_df = pd.DataFrame(balance_data)
-st.dataframe(balance_df[['person', 'income', 'expense', 'transferred_in', 'transferred_out', 'total']])
-
-# Pie chart total
-st.subheader("Overall Expense Breakdown")
-type_sum = df.groupby('type')['amount'].sum()
-st.plotly_chart(px.pie(values=type_sum.values, names=type_sum.index, title="Transaction Type Distribution"))
+    # Expense breakdown total balance
+    st.subheader("📊 Balance by Person")
+    
+    people = sorted(pd.unique(df[['from', 'to']].values.ravel('K')))
+    balance_data = []
+    for person in people:
+        income = df[(df['type'] == 'income') & (df['to'] == person)]['amount'].sum() + \
+                 df[(df['type'] == 'expense') & (df['to'] == person)]['amount'].sum()
+        expense = df[(df['type'] == 'expense') & (df['from'] == person)]['amount'].sum() + \
+                  df[(df['type'] == 'income') & (df['from'] == person)]['amount'].sum()
+        transferred_in = df[(df['type'] == 'transfer') & (df['to'] == person)]['amount'].sum()
+        transferred_out = df[(df['type'] == 'transfer') & (df['from'] == person)]['amount'].sum()
+        total = (income + transferred_in) - (expense + transferred_out)
+        balance_data.append({
+            'person': person,
+            'income': income,
+            'expense': expense,
+            'transferred_in': transferred_in,
+            'transferred_out': transferred_out,
+            'total': total
+        })
+    
+    balance_df = pd.DataFrame(balance_data)
+    st.dataframe(balance_df[['person', 'income', 'expense', 'transferred_in', 'transferred_out', 'total']])
+    
+    # Pie chart total
+    st.subheader("Overall Expense Breakdown")
+    type_sum = df.groupby('type')['amount'].sum()
+    st.plotly_chart(px.pie(values=type_sum.values, names=type_sum.index, title="Transaction Type Distribution"))
+    
