@@ -35,82 +35,114 @@ def get_google_sheet():
         st.error(f"Unexpected error accessing Google Sheet: {str(e)}")
         return None
 
-# Initialize session state for data
-if 'df' not in st.session_state:
+# Load data
+def load_data():
     sheet = get_google_sheet()
     if sheet:
         try:
             data = sheet.get_all_records()
-            if data:  # Check if data is not empty
-                st.session_state.df = pd.DataFrame(data)
-                expected_columns = ['amount', 'from', 'to', 'description', 'date', 'type']
-                if all(col in st.session_state.df.columns for col in expected_columns):
-                    st.session_state.df['date'] = pd.to_datetime(st.session_state.df['date'], errors='coerce')
-                else:
-                    st.error(f"Missing columns in Google Sheet. Expected: {expected_columns}, Found: {list(st.session_state.df.columns)}")
-                    st.session_state.df = pd.DataFrame(columns=expected_columns)
+            if data:
+                df = pd.DataFrame(data)
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                return df
             else:
-                st.session_state.df = pd.DataFrame(columns=['amount', 'from', 'to', 'description', 'date', 'type'])
                 st.warning("Google Sheet is empty. Initialized empty DataFrame.")
         except Exception as e:
-            st.error(f"Error fetching data from Google Sheet: {str(e)}")
-            st.session_state.df = pd.DataFrame(columns=['amount', 'from', 'to', 'description', 'date', 'type'])
-    else:
-        st.session_state.df = pd.DataFrame(columns=['amount', 'from', 'to', 'description', 'date', 'type'])
-        st.error("Failed to connect to Google Sheet. Using empty DataFrame.")
+            st.error(f"Error loading data: {str(e)}")
+    return pd.DataFrame(columns=['amount', 'from', 'to', 'description', 'date', 'type'])
 
-# Rest of the app
-st.title("Family Expense Tracker")
-st.markdown("Track your family's expenses with ease!")
+# Initialize session state for data
+if 'df' not in st.session_state:
+    st.session_state.df = load_data()
 
-# Form for adding transactions
+# Initialize session state for form inputs
+if 'from_person' not in st.session_state:
+    st.session_state.from_person = ""
+if 'to_person' not in st.session_state:
+    st.session_state.to_person = ""
+
+# Title
+st.title("🌟 Family Expense Tracker")
+
+# Add transaction
+st.subheader("Add New Transaction")
+
+# Get unique members from DataFrame
+member_list = list(set(st.session_state.df['from'].tolist() + st.session_state.df['to'].tolist()))
+members = sorted([m for m in member_list if m])
+
+# From person selection
+from_select = st.selectbox("From", members + ["Other"], key="from_select")
+if from_select == "Other":
+    st.session_state.from_person = st.text_input("Enter new 'From' name", key="from_input")
+else:
+    st.session_state.from_person = from_select
+
+# To person selection
+to_select = st.selectbox("To", members + ["Other"], key="to_select")
+if to_select == "Other":
+    st.session_state.to_person = st.text_input("Enter new 'To' name", key="to_input")
+else:
+    st.session_state.to_person = to_select
+
+# Transaction form
 with st.form("transaction_form"):
-    st.subheader("Add New Transaction")
-    amount = st.number_input("Amount", min_value=0.0, format="%.2f")
-    from_person = st.text_input("From", placeholder="e.g., Yash Bob")
-    to_person = st.text_input("To", placeholder="e.g., Balar Kotak Mahindra")
-    description = st.text_input("Description", placeholder="e.g., for new cloth")
-    date = st.date_input("Date", value=datetime.today())
+    amount = st.number_input("Amount", min_value=0.00, format="%.2f")
     type_transaction = st.selectbox("Type", ["income", "expense", "transfer"])
-    submit_button = st.form_submit_button("Add Transaction")
+    description = st.text_input("Description", placeholder="e.g., new clothes")
+    date = st.date_input("Date", value=datetime.today())
+    submit = st.form_submit_button("Add Transaction")
 
-    if submit_button:
-        new_transaction = {
-            "amount": amount,
-            "from": from_person,
-            "to": to_person,
-            "description": description,
-            "date": date.strftime("%Y-%m-%d"),
-            "type": type_transaction
-        }
-        sheet = get_google_sheet()
-        if sheet:
-            try:
-                sheet.append_row([new_transaction["amount"], new_transaction["from"], new_transaction["to"],
-                                 new_transaction["description"], new_transaction["date"], new_transaction["type"]])
-                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_transaction])], ignore_index=True)
-                st.session_state.df['date'] = pd.to_datetime(st.session_state.df['date'], errors='coerce')
-                st.success("Transaction added successfully!")
-            except Exception as e:
-                st.error(f"Error adding transaction to Google Sheet: {str(e)}")
+    if submit:
+        if not all([amount, st.session_state.from_person, st.session_state.to_person, description, date, type_transaction]):
+            st.warning("Please fill all fields.")
         else:
-            st.error("Failed to add transaction due to Google Sheet connection issue.")
+            transaction = {
+                "amount": amount,
+                "from": st.session_state.from_person,
+                "to": st.session_state.to_person,
+                "description": description,
+                "date": date.strftime("%Y-%m-%d"),
+                "type": type_transaction
+            }
+            sheet = get_google_sheet()
+            if sheet:
+                try:
+                    sheet.append_row([
+                        transaction["amount"],
+                        transaction["from"],
+                        transaction["to"],
+                        transaction["description"],
+                        transaction["date"],
+                        transaction["type"]
+                    ])
+                    st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([transaction])], ignore_index=True)
+                    st.session_state.df['date'] = pd.to_datetime(st.session_state.df['date'], errors='coerce')
+                    st.success("Transaction added successfully!")
+                    # Clear form inputs
+                    st.session_state.from_person = ""
+                    st.session_state.to_person = ""
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to add transaction: {str(e)}")
+            else:
+                st.error("Google Sheet not available.")
 
-# Search and filter section
+# Search & filter
 st.subheader("Search Transactions")
 with st.form("search_form"):
+    search_term = st.text_input("Search by Name or Description")
+    type_filter = st.selectbox("Transaction Type", ["All", "income", "expense", "transfer"])
     col1, col2 = st.columns(2)
     with col1:
-        search_term = st.text_input("Search by From, To, or Description")
+        date_start = st.date_input("Start Date", value=None, max_value=datetime.today())
     with col2:
-        type_filter = st.selectbox("Filter by Type", ["All", "income", "expense", "transfer"])
-    date_start = st.date_input("Start Date", value=None)
-    date_end = st.date_input("End Date", value=None)
-    search_button = st.form_submit_button("Search")
+        date_end = st.date_input("End Date", value=None, max_value=datetime.today())
+    search_btn = st.form_submit_button("Search")
 
-# Filtering logic
-filtered_df = st.session_state.df
-if search_button:
+filtered_df = st.session_state.df.copy()
+
+if search_btn:
     if search_term:
         filtered_df = filtered_df[
             filtered_df['from'].str.contains(search_term, case=False, na=False) |
@@ -124,32 +156,71 @@ if search_button:
     if date_end:
         filtered_df = filtered_df[filtered_df['date'] <= pd.to_datetime(date_end)]
 
-# Display filtered results
-st.subheader("Transaction Results")
+st.subheader("Filtered Transactions")
+filtered_df['date'] = pd.to_datetime(filtered_df['date']).dt.strftime('%d-%m-%Y')
 st.dataframe(filtered_df)
 
-# Download as Excel
 if not filtered_df.empty:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        filtered_df.to_excel(writer, index=False, sheet_name='Transactions')
-    excel_data = output.getvalue()
+        filtered_df.to_excel(writer, index=False)
     st.download_button(
-        label="Download as Excel",
-        data=excel_data,
-        file_name="family_expenses.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "Download Excel",
+        data=output.getvalue(),
+        file_name=f"transactions_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
     )
 
-# Optional: Monthly summary
-st.subheader("Monthly Summary")
-if not filtered_df.empty:
-    filtered_df['month'] = filtered_df['date'].dt.to_period('M')
-    summary = filtered_df.groupby(['month', 'type'])['amount'].sum().unstack().fillna(0)
-    st.write(summary)
+# Monthly summary by person
+st.subheader("📆 Monthly Summary by Person")
+df = st.session_state.df.copy()
+df['month'] = df['date'].dt.strftime('%m-%Y')
 
-# Optional: Pie chart
-if not filtered_df.empty:
-    st.subheader("Expense Breakdown")
-    pie_data = filtered_df.groupby('type')['amount'].sum()
-    st.plotly_chart(px.pie(values=pie_data.values, names=pie_data.index, title="Transaction Types"))
+
+person_summary = []
+people = pd.unique(df[['from', 'to']].values.ravel('K'))
+
+for person in people:
+    monthly = df.copy()
+    monthly['net'] = 0
+    monthly.loc[(monthly['type'] == 'income') & (monthly['from'] != person)& (monthly['to'] == person), 'net'] = monthly['amount']
+    monthly.loc[(monthly['type'] == 'income') & (monthly['to'] != person)& (monthly['from'] == person), 'net'] = -monthly['amount']
+    monthly.loc[(monthly['type'] == 'expense')& (monthly['from'] != person) & (monthly['from'] == person), 'net'] = -monthly['amount']
+    monthly.loc[(monthly['type'] == 'expense')& (monthly['from'] != person) & (monthly['to'] == person), 'net'] = monthly['amount']
+    monthly.loc[(monthly['type'] == 'transfer') & (monthly['from'] != person)& (monthly['to'] == person), 'net'] = monthly['amount']
+    monthly.loc[(monthly['type'] == 'transfer') & (monthly['to'] != person)& (monthly['from'] == person), 'net'] = -monthly['amount']
+    summary = monthly.groupby('month')['net'].sum().reset_index()
+    summary['person'] = person
+    person_summary.append(summary)
+
+summary_df = pd.concat(person_summary)
+summary_pivot = summary_df.pivot(index='month', columns='person', values='net').fillna(0)
+st.dataframe(summary_pivot)
+
+# Expense breakdown total balance
+st.subheader("📊 Balance by Person")
+people = sorted(pd.unique(df[['from', 'to']].values.ravel('K')))
+balance_data = []
+for person in people:
+    income = df[(df['type'] == 'income') & (df['to'] == person)]['amount'].sum() + \
+             df[(df['type'] == 'expense') & (df['to'] == person)]['amount'].sum()
+    expense = df[(df['type'] == 'expense') & (df['from'] == person)]['amount'].sum() + \
+              df[(df['type'] == 'income') & (df['from'] == person)]['amount'].sum()
+    transferred_in = df[(df['type'] == 'transfer') & (df['to'] == person)]['amount'].sum()
+    transferred_out = df[(df['type'] == 'transfer') & (df['from'] == person)]['amount'].sum()
+    total = (income + transferred_in) - (expense + transferred_out)
+    balance_data.append({
+        'person': person,
+        'income': income,
+        'expense': expense,
+        'transferred_in': transferred_in,
+        'transferred_out': transferred_out,
+        'total': total
+    })
+
+balance_df = pd.DataFrame(balance_data)
+st.dataframe(balance_df[['person', 'income', 'expense', 'transferred_in', 'transferred_out', 'total']])
+
+# Pie chart total
+st.subheader("Overall Expense Breakdown")
+type_sum = df.groupby('type')['amount'].sum()
+st.plotly_chart(px.pie(values=type_sum.values, names=type_sum.index, title="Transaction Type Distribution"))
